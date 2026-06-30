@@ -152,6 +152,19 @@ async def on_message(message):
     # Пасхалка "пицца"
     if "пицца" in message.content.lower():
         await message.reply("Yummi", mention_author=False)
+            # Пасхалка "skibidi"
+    if re.search(r"скибиди|skibidi", message.content, re.IGNORECASE):
+        await message.reply(
+            "Skibidi ua-papa!\n"
+            "Skibidi ua-papa-papa!\n"
+            "Skibidi ua-papa-papa-papa-papa!\n"
+            "Skibidi papa!\n"
+            "Skibidi boom-boom, ay!\n"
+            "Skibidi boom-boom-boom-boom, ay!\n"
+            "Skibidi boom-boom-boom-boom-boom-papa-boom-boom!\n"
+            "Skibidi papa!",
+            mention_author=False
+        )
 
     # Проверка на оплату дома
     match = re.search(r"оплачиваю\s+дом\s+на\s+(\d+)\s*д(?:н(?:ей|я|ь)?)?", message.content, re.IGNORECASE)
