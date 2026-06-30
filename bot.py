@@ -142,6 +142,13 @@ async def on_ready():
 async def on_message(message):
     if message.author.bot:
         return
+
+    # Пасхалка "пицца"
+    if "пицца" in message.content.lower():
+        await message.channel.send("Yummi")
+        # Не возвращаемся, чтобы остальные обработчики тоже работали
+
+    # Проверка на оплату дома
     match = re.search(r"оплачиваю\s+дом\s+на\s+(\d+)\s*д(?:н(?:ей|я|ь)?)?", message.content, re.IGNORECASE)
     if match:
         days = int(match.group(1))
