@@ -12,15 +12,16 @@ from discord.ext import commands
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 VOICE_CHANNEL_ID = 1435163969219334306  # ID голосового канала для обзвона, или None
 ALLOWED_ROLES = ["Временный лидер", "Зам начальника", "Зам создателя", "Создатель 🔧"]
-SLOT_DURATION = 15          # минут (бронь волны на 15 мин)
-MUTE_DURATION = timedelta(minutes=30)   # длительность мута за повторное нарушение
-MIN_BOOK_DELAY = timedelta(minutes=5)   # нельзя записаться менее чем за 5 минут до начала
-TIMEZONE_OFFSET_HOURS = 3               # смещение от UTC (Москва +3)
+SLOT_DURATION = 15          # минут (бронь волны)
+MUTE_DURATION = timedelta(minutes=30)
+MIN_BOOK_DELAY = timedelta(minutes=5)   # запись минимум за 5 минут
+TIMEZONE_OFFSET_HOURS = 3               # UTC+3 (Москва)
 
 # ---------- ФАЙЛЫ ----------
 REMINDERS_FILE = "reminders.json"
 INTERVIEWS_FILE = "interviews.json"
 VIOLATIONS_FILE = "violations.json"
+QUESTIONS_FILE = "questions.json"
 
 def load_json(path, default):
     if not os.path.exists(path):
@@ -75,31 +76,29 @@ def get_next_free(h_local, m_local):
         if lh == 23 and lm > 55:
             return "сегодня больше нет"
 
-async def reject(ctx, error_message):
-    """Обрабатывает нарушение правил гос. волны."""
+async def reject(ctx, msg):
+    await ctx.reply(msg, mention_author=False)
+    try:
+        await ctx.message.add_reaction("❌")
+    except:
+        pass
     uid = str(ctx.author.id)
     today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-
-    # Инициализация или сброс при смене дня
     if uid not in bot.violations:
         bot.violations[uid] = {"count": 0, "date": today}
     elif bot.violations[uid]["date"] != today:
         bot.violations[uid] = {"count": 0, "date": today}
-
     bot.violations[uid]["count"] += 1
     cnt = bot.violations[uid]["count"]
-
     if cnt == 1:
-        final_msg = error_message + "\n⚠️ Это ваше первое нарушение за день. При повторном нарушении будет мут на 30 минут."
+        final_msg = msg + "\n⚠️ Это ваше первое нарушение за день. При повторном нарушении будет мут на 30 минут."
     else:
         try:
             await ctx.author.timeout(MUTE_DURATION, reason="Повторное нарушение правил гос. волны")
             final_msg = f"🔇 {ctx.author.mention} мут на 30 минут за повторное нарушение."
         except discord.Forbidden:
             final_msg = "⚠️ Не удалось выдать мут (нет прав)."
-        # После мута сбрасываем счётчик
         bot.violations[uid] = {"count": 0, "date": today}
-
     save_json(VIOLATIONS_FILE, bot.violations)
     await ctx.reply(final_msg, mention_author=False)
     try:
@@ -115,6 +114,8 @@ bot = commands.Bot(command_prefix="!", intents=intents)
 bot.interviews = load_json(INTERVIEWS_FILE, [])
 bot.violations = load_json(VIOLATIONS_FILE, {})
 bot.reminders = load_json(REMINDERS_FILE, [])
+bot.questions = load_json(QUESTIONS_FILE, {})
+bot.active_exams = {}   # user_id -> exam_dict
 
 async def check_interviews_loop():
     await bot.wait_until_ready()
@@ -149,10 +150,9 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # Пасхалка "пицца"
+    # Пасхалки
     if "пицца" in message.content.lower():
         await message.reply("Yummi", mention_author=False)
-            # Пасхалка "skibidi"
     if re.search(r"скибиди|skibidi", message.content, re.IGNORECASE):
         await message.reply(
             "Skibidi ua-papa!\n"
@@ -166,7 +166,7 @@ async def on_message(message):
             mention_author=False
         )
 
-    # Проверка на оплату дома
+    # Оплата дома
     match = re.search(r"оплачиваю\s+дом\s+на\s+(\d+)\s*д(?:н(?:ей|я|ь)?)?", message.content, re.IGNORECASE)
     if match:
         days = int(match.group(1))
@@ -246,22 +246,17 @@ async def sobes(ctx, *, text: str):
     h_utc, m_utc = local_to_utc(h_local, m_local)
     now_utc = datetime.now(timezone.utc)
     slot_dt = now_utc.replace(hour=h_utc, minute=m_utc, second=0, microsecond=0)
-
     if slot_dt < now_utc:
         await reject(ctx, "❌ Нельзя записаться на прошедшее время.")
         return
-
-    # Минимальная задержка 5 минут
     if slot_dt - now_utc < MIN_BOOK_DELAY:
         await reject(ctx, f"❌ Запись возможна не менее чем за {MIN_BOOK_DELAY.total_seconds()//60} минут до начала.")
         return
-
     bot.interviews = clean_old(bot.interviews)
     if has_conflict(h_utc, m_utc, bot.interviews):
         next_free = get_next_free(h_local, m_local)
         await reject(ctx, f"❌ Занято. Ближайшее свободное: **{next_free}**.")
         return
-
     slot = {
         "family": family,
         "start": [h_utc, m_utc],
@@ -325,6 +320,102 @@ async def list(ctx):
         t = s.get("type", "собес")
         msg += f"**{s['family']}** — {h_local:02d}:{m_local:02d} ({t}) записал {uname}\n"
     await ctx.reply(msg, mention_author=False)
+
+# ---------- ОБЗВОН (АВТОШКОЛА / ЭКЗАМЕН) ----------
+@bot.command(name="обзвон")
+async def start_exam(ctx, variant: str = None):
+    if variant is None:
+        await ctx.send("Укажите номер варианта: `!обзвон 1`, `!обзвон 2`, `!обзвон 3` или `!обзвон 4`")
+        return
+    if variant not in ["1", "2", "3", "4"]:
+        await ctx.send("Неверный вариант. Доступны: 1, 2, 3, 4")
+        return
+    if ctx.author.id in bot.active_exams:
+        await ctx.send("У вас уже есть активный обзвон. Сначала завершите его командой `!ответ <ответ>` до конца.")
+        return
+
+    questions = bot.questions.get(variant, [])
+    if not questions:
+        await ctx.send(f"Вариант {variant} пока пуст. Обратитесь к администратору.")
+        return
+
+    max_points = sum(q.get("points", 1) for q in questions)
+    total_questions = len(questions)
+    exam = {
+        "variant": variant,
+        "channel_id": ctx.channel.id,
+        "questions": questions,
+        "current": 0,
+        "correct": 0,
+        "points": 0,
+        "max_points": max_points,
+        "total": total_questions,
+        "pass_threshold": 6   # минимум правильных ответов для сдачи
+    }
+    bot.active_exams[ctx.author.id] = exam
+
+    q = questions[0]
+    pts = q.get("points", 1)
+    q_number = q.get("number", 1)
+    await ctx.send(
+        f"**Вопрос {q_number}/{total_questions}** ({pts} балл.): {q['question']}\n"
+        f"_Ответьте командой_ `!ответ <ваш ответ>`"
+    )
+
+@bot.command(name="ответ")
+async def answer_exam(ctx, *, answer: str = None):
+    user_id = ctx.author.id
+    if user_id not in bot.active_exams:
+        return
+    exam = bot.active_exams[user_id]
+    if ctx.channel.id != exam["channel_id"]:
+        return
+
+    if answer is None:
+        await ctx.send("Укажите ваш ответ: `!ответ <текст>`")
+        return
+
+    q = exam["questions"][exam["current"]]
+
+    # Определяем список правильных ответов
+    if "answers" in q:
+        correct_answers = [a.strip().lower() for a in q["answers"]]
+    else:
+        correct_answers = [q["answer"].strip().lower()]
+
+    user_answer = answer.strip().lower()
+
+    if user_answer in correct_answers:
+        exam["correct"] += 1
+        pts = q.get("points", 1)
+        exam["points"] += pts
+
+    exam["current"] += 1
+    if exam["current"] >= exam["total"]:
+        correct = exam["correct"]
+        total = exam["total"]
+        score = exam["points"]
+        max_score = exam["max_points"]
+        if correct >= exam["pass_threshold"]:
+            result_text = "Обзвон пройден"
+        else:
+            result_text = "Вы не прошли обзвон"
+        await ctx.send(
+            f"**Обзвон завершён!**\n"
+            f"Правильных ответов: {correct} из {total} (нужно ≥ {exam['pass_threshold']})\n"
+            f"Набрано баллов: {score} из {max_score}\n"
+            f"Результат: **{result_text}**"
+        )
+        del bot.active_exams[user_id]
+    else:
+        next_q = exam["questions"][exam["current"]]
+        pts = next_q.get("points", 1)
+        q_number = next_q.get("number", exam["current"]+1)
+        await ctx.send(
+            f"Понял, дальше\n"
+            f"**Вопрос {q_number}/{exam['total']}** ({pts} балл.): {next_q['question']}\n"
+            f"_Ответьте командой_ `!ответ <ваш ответ>`"
+        )
 
 if __name__ == "__main__":
     bot.run(TOKEN)
