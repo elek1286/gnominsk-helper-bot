@@ -8,16 +8,14 @@ from datetime import datetime, timedelta
 import discord
 from discord.ext import commands
 
-# ---------- НАСТРОЙКИ (ЗАМЕНИ ЗДЕСЬ) ----------
+# ---------- НАСТРОЙКИ ----------
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 VOICE_CHANNEL_ID = 1435163969219334306  # ID голосового канала для обзвона, или None
 ALLOWED_ROLES = ["Временный лидер", "Зам начальника", "Зам создателя", "Создатель 🔧"]
 SLOT_DURATION = 15  # минут
 MUTE_DURATION = timedelta(minutes=30)
 VIOLATION_WINDOW = timedelta(minutes=5)
-
-# Часовой пояс: разница между местным временем и UTC (Москва: 3)
-TIMEZONE_OFFSET_HOURS = 3  # Укажи своё смещение
+TIMEZONE_OFFSET_HOURS = 3  # смещение от UTC (Москва +3)
 
 # ---------- ФАЙЛЫ ----------
 REMINDERS_FILE = "reminders.json"
@@ -42,12 +40,10 @@ def check_time_format(time_str):
         return False
 
 def local_to_utc(h, m):
-    """Переводит местное время в UTC с учётом смещения"""
     total = (h * 60 + m - TIMEZONE_OFFSET_HOURS * 60) % (24 * 60)
     return total // 60, total % 60
 
 def utc_to_local(h, m):
-    """Переводит UTC в местное время для отображения"""
     total = (h * 60 + m + TIMEZONE_OFFSET_HOURS * 60) % (24 * 60)
     return total // 60, total % 60
 
@@ -55,7 +51,7 @@ def has_conflict(utc_h, utc_m, interviews, duration=SLOT_DURATION):
     new_start = utc_h * 60 + utc_m
     new_end = new_start + duration
     for slot in interviews:
-        s_h, s_m = slot["start"]  # уже хранится в UTC
+        s_h, s_m = slot["start"]
         exist_start = s_h * 60 + s_m
         exist_end = exist_start + duration
         if new_start < exist_end and new_end > exist_start:
@@ -68,15 +64,11 @@ def clean_old(interviews):
     return [s for s in interviews if (s["start"][0]*60 + s["start"][1] + SLOT_DURATION) > cur]
 
 def get_next_free(h_local, m_local):
-    """Ищет ближайшее свободное время (местное)"""
     now_utc = datetime.utcnow()
-    # Начинаем с переданного местного времени
-    base_local = now_utc.replace(hour=0, minute=0)  # фиктивная дата
-    base_local = base_local.replace(hour=h_local, minute=m_local)
+    base_local = now_utc.replace(hour=h_local, minute=m_local)
     while True:
         base_local += timedelta(minutes=5)
         lh, lm = base_local.hour, base_local.minute
-        # Конвертируем в UTC для проверки конфликта
         uh, um = local_to_utc(lh, lm)
         if not has_conflict(uh, um, bot.interviews):
             return f"{lh:02d}:{lm:02d}"
@@ -85,6 +77,10 @@ def get_next_free(h_local, m_local):
 
 async def reject(ctx, msg):
     await ctx.reply(msg, mention_author=False)
+    try:
+        await ctx.message.add_reaction("❌")
+    except:
+        pass
     uid = str(ctx.author.id)
     now_iso = datetime.utcnow().isoformat()
     if uid not in bot.violations:
@@ -117,7 +113,7 @@ bot.reminders = load_json(REMINDERS_FILE, [])
 async def check_interviews_loop():
     await bot.wait_until_ready()
     notified = set()
-    print("[LOOP] Started, using UTC time, offset =", TIMEZONE_OFFSET_HOURS)
+    print("[LOOP] Started, offset =", TIMEZONE_OFFSET_HOURS)
     while not bot.is_closed():
         now_utc = datetime.utcnow()
         bot.interviews = clean_old(bot.interviews)
@@ -133,7 +129,6 @@ async def check_interviews_loop():
                     else:
                         text = f"⏰ <@{slot['user_id']}>, начинается собеседование, заходите"
                     await channel.send(text)
-                    print(f"[{datetime.utcnow().strftime('%H:%M:%S')} UTC] Sent notification for {slot['family']} (UTC slot {slot['start']})")
                 notified.add(slot_id)
         await asyncio.sleep(30)
 
@@ -207,7 +202,7 @@ async def setup_hook():
 @bot.command()
 async def sobes(ctx, *, text: str):
     if not any(role.name in ALLOWED_ROLES for role in ctx.author.roles):
-        await ctx.reply("❌ Нет прав.", mention_author=False)
+        await reject(ctx, "❌ Нет прав.")
         return
     parts = [p.strip() for p in text.split("|")]
     if len(parts) < 2:
@@ -223,7 +218,6 @@ async def sobes(ctx, *, text: str):
         await reject(ctx, "❌ Время должно быть ЧЧ:ММ и кратно 5 минутам.")
         return
     h_local, m_local = map(int, time_str.split(":"))
-    # Конвертируем в UTC
     h_utc, m_utc = local_to_utc(h_local, m_local)
     now_utc = datetime.utcnow()
     slot_dt = now_utc.replace(hour=h_utc, minute=m_utc, second=0, microsecond=0)
@@ -237,7 +231,7 @@ async def sobes(ctx, *, text: str):
         return
     slot = {
         "family": family,
-        "start": [h_utc, m_utc],  # храним в UTC
+        "start": [h_utc, m_utc],
         "user_id": ctx.author.id,
         "channel_id": ctx.channel.id,
         "type": type_str
@@ -246,6 +240,10 @@ async def sobes(ctx, *, text: str):
     save_json(INTERVIEWS_FILE, bot.interviews)
     type_text = "обзвон" if type_str == "обзвон" else "собеседование"
     await ctx.reply(f"✅ Семья **{family}** записана на **{type_text}** в **{time_str}** (местное). Уведомление придёт вовремя.", mention_author=False)
+    try:
+        await ctx.message.add_reaction("✅")
+    except:
+        pass
 
 @bot.command()
 async def cancel(ctx, *, text: str = None):
@@ -268,8 +266,16 @@ async def cancel(ctx, *, text: str = None):
             bot.interviews.remove(slot)
             save_json(INTERVIEWS_FILE, bot.interviews)
             await ctx.reply(f"🗑️ Запись **{family}** на {time_str} отменена.", mention_author=False)
+            try:
+                await ctx.message.add_reaction("✅")
+            except:
+                pass
             return
     await ctx.reply("❌ Запись не найдена.", mention_author=False)
+    try:
+        await ctx.message.add_reaction("❌")
+    except:
+        pass
 
 @bot.command()
 async def list(ctx):
@@ -280,7 +286,6 @@ async def list(ctx):
     msg = "**Записи на гос. волну:**\n"
     for s in sorted(bot.interviews, key=lambda x: x["start"]):
         h_utc, m_utc = s["start"]
-        # Переводим в местное для отображения
         h_local, m_local = utc_to_local(h_utc, m_utc)
         user = bot.get_user(s["user_id"])
         uname = user.mention if user else f"<@{s['user_id']}>"
