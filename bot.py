@@ -12,10 +12,10 @@ from discord.ext import commands
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 VOICE_CHANNEL_ID = 1435163969219334306  # ID голосового канала для обзвона, или None
 ALLOWED_ROLES = ["Временный лидер", "Зам начальника", "Зам создателя", "Создатель 🔧"]
-SLOT_DURATION = 15  # минут
-MUTE_DURATION = timedelta(minutes=30)
-VIOLATION_WINDOW = timedelta(minutes=5)
-TIMEZONE_OFFSET_HOURS = 3  # смещение от UTC (Москва +3)
+SLOT_DURATION = 15          # минут (бронь волны на 15 мин)
+MUTE_DURATION = timedelta(minutes=30)   # длительность мута за повторное нарушение
+MIN_BOOK_DELAY = timedelta(minutes=5)   # нельзя записаться менее чем за 5 минут до начала
+TIMEZONE_OFFSET_HOURS = 3               # смещение от UTC (Москва +3)
 
 # ---------- ФАЙЛЫ ----------
 REMINDERS_FILE = "reminders.json"
@@ -75,31 +75,37 @@ def get_next_free(h_local, m_local):
         if lh == 23 and lm > 55:
             return "сегодня больше нет"
 
-async def reject(ctx, msg):
-    await ctx.reply(msg, mention_author=False)
+async def reject(ctx, error_message):
+    """Обрабатывает нарушение правил гос. волны."""
+    uid = str(ctx.author.id)
+    today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+
+    # Инициализация или сброс при смене дня
+    if uid not in bot.violations:
+        bot.violations[uid] = {"count": 0, "date": today}
+    elif bot.violations[uid]["date"] != today:
+        bot.violations[uid] = {"count": 0, "date": today}
+
+    bot.violations[uid]["count"] += 1
+    cnt = bot.violations[uid]["count"]
+
+    if cnt == 1:
+        final_msg = error_message + "\n⚠️ Это ваше первое нарушение за день. При повторном нарушении будет мут на 30 минут."
+    else:
+        try:
+            await ctx.author.timeout(MUTE_DURATION, reason="Повторное нарушение правил гос. волны")
+            final_msg = f"🔇 {ctx.author.mention} мут на 30 минут за повторное нарушение."
+        except discord.Forbidden:
+            final_msg = "⚠️ Не удалось выдать мут (нет прав)."
+        # После мута сбрасываем счётчик
+        bot.violations[uid] = {"count": 0, "date": today}
+
+    save_json(VIOLATIONS_FILE, bot.violations)
+    await ctx.reply(final_msg, mention_author=False)
     try:
         await ctx.message.add_reaction("❌")
     except:
         pass
-    uid = str(ctx.author.id)
-    now_iso = datetime.now(timezone.utc).isoformat()
-    if uid not in bot.violations:
-        bot.violations[uid] = {"count": 0, "last_time": None}
-    last = bot.violations[uid]["last_time"]
-    cnt = bot.violations[uid]["count"]
-    if last:
-        last_dt = datetime.fromisoformat(last)
-        if (datetime.now(timezone.utc) - last_dt) < VIOLATION_WINDOW and cnt >= 1:
-            try:
-                await ctx.author.timeout(MUTE_DURATION, reason="Повторное нарушение")
-                await ctx.reply(f"🔇 {ctx.author.mention} мут 30 мин за повторное нарушение.", mention_author=False)
-            except:
-                await ctx.reply("⚠️ Не удалось выдать мут.", mention_author=False)
-            bot.violations[uid] = {"count": 0, "last_time": now_iso}
-            save_json(VIOLATIONS_FILE, bot.violations)
-            return
-    bot.violations[uid] = {"count": cnt+1, "last_time": now_iso}
-    save_json(VIOLATIONS_FILE, bot.violations)
 
 # ---------- БОТ ----------
 intents = discord.Intents.default()
@@ -146,7 +152,6 @@ async def on_message(message):
     # Пасхалка "пицца"
     if "пицца" in message.content.lower():
         await message.reply("Yummi", mention_author=False)
-        # Продолжаем обработку, если есть другие команды
 
     # Проверка на оплату дома
     match = re.search(r"оплачиваю\s+дом\s+на\s+(\d+)\s*д(?:н(?:ей|я|ь)?)?", message.content, re.IGNORECASE)
@@ -228,14 +233,22 @@ async def sobes(ctx, *, text: str):
     h_utc, m_utc = local_to_utc(h_local, m_local)
     now_utc = datetime.now(timezone.utc)
     slot_dt = now_utc.replace(hour=h_utc, minute=m_utc, second=0, microsecond=0)
+
     if slot_dt < now_utc:
         await reject(ctx, "❌ Нельзя записаться на прошедшее время.")
         return
+
+    # Минимальная задержка 5 минут
+    if slot_dt - now_utc < MIN_BOOK_DELAY:
+        await reject(ctx, f"❌ Запись возможна не менее чем за {MIN_BOOK_DELAY.total_seconds()//60} минут до начала.")
+        return
+
     bot.interviews = clean_old(bot.interviews)
     if has_conflict(h_utc, m_utc, bot.interviews):
         next_free = get_next_free(h_local, m_local)
         await reject(ctx, f"❌ Занято. Ближайшее свободное: **{next_free}**.")
         return
+
     slot = {
         "family": family,
         "start": [h_utc, m_utc],
