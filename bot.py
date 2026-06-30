@@ -3,7 +3,7 @@ import asyncio
 import json
 import os
 import re
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 
 import discord
 from discord.ext import commands
@@ -59,12 +59,12 @@ def has_conflict(utc_h, utc_m, interviews, duration=SLOT_DURATION):
     return False
 
 def clean_old(interviews):
-    now_utc = datetime.utcnow()
+    now_utc = datetime.now(timezone.utc)
     cur = now_utc.hour * 60 + now_utc.minute
     return [s for s in interviews if (s["start"][0]*60 + s["start"][1] + SLOT_DURATION) > cur]
 
 def get_next_free(h_local, m_local):
-    now_utc = datetime.utcnow()
+    now_utc = datetime.now(timezone.utc)
     base_local = now_utc.replace(hour=h_local, minute=m_local)
     while True:
         base_local += timedelta(minutes=5)
@@ -82,14 +82,14 @@ async def reject(ctx, msg):
     except:
         pass
     uid = str(ctx.author.id)
-    now_iso = datetime.utcnow().isoformat()
+    now_iso = datetime.now(timezone.utc).isoformat()
     if uid not in bot.violations:
         bot.violations[uid] = {"count": 0, "last_time": None}
     last = bot.violations[uid]["last_time"]
     cnt = bot.violations[uid]["count"]
     if last:
         last_dt = datetime.fromisoformat(last)
-        if (datetime.utcnow() - last_dt) < VIOLATION_WINDOW and cnt >= 1:
+        if (datetime.now(timezone.utc) - last_dt) < VIOLATION_WINDOW and cnt >= 1:
             try:
                 await ctx.author.timeout(MUTE_DURATION, reason="Повторное нарушение")
                 await ctx.reply(f"🔇 {ctx.author.mention} мут 30 мин за повторное нарушение.", mention_author=False)
@@ -115,7 +115,7 @@ async def check_interviews_loop():
     notified = set()
     print("[LOOP] Started, offset =", TIMEZONE_OFFSET_HOURS)
     while not bot.is_closed():
-        now_utc = datetime.utcnow()
+        now_utc = datetime.now(timezone.utc)
         bot.interviews = clean_old(bot.interviews)
         for slot in bot.interviews[:]:
             slot_id = f"{slot['family']}-{slot['start'][0]:02d}-{slot['start'][1]:02d}"
@@ -145,8 +145,8 @@ async def on_message(message):
 
     # Пасхалка "пицца"
     if "пицца" in message.content.lower():
-        await message.channel.send("Yummi")
-        # Не возвращаемся, чтобы остальные обработчики тоже работали
+        await message.reply("Yummi", mention_author=False)
+        # Продолжаем обработку, если есть другие команды
 
     # Проверка на оплату дома
     match = re.search(r"оплачиваю\s+дом\s+на\s+(\d+)\s*д(?:н(?:ей|я|ь)?)?", message.content, re.IGNORECASE)
@@ -155,7 +155,7 @@ async def on_message(message):
         if days <= 2:
             await message.channel.send(f"{message.author.mention}, оплата всего на {days} дн. – напоминаю сейчас!")
             return
-        remind_at = datetime.utcnow() + timedelta(days=days-2)
+        remind_at = datetime.now(timezone.utc) + timedelta(days=days-2)
         reminder = {
             "user_id": message.author.id,
             "channel_id": message.channel.id,
@@ -168,7 +168,7 @@ async def on_message(message):
             f"{message.author.mention}, понял! Я напомню об оплате {remind_at.strftime('%d.%m.%Y в %H:%M')} (UTC)."
         )
         async def remind(rem):
-            delay = (remind_at - datetime.utcnow()).total_seconds()
+            delay = (remind_at - datetime.now(timezone.utc)).total_seconds()
             if delay > 0:
                 await asyncio.sleep(delay)
             user = bot.get_user(rem["user_id"]) or await bot.fetch_user(rem["user_id"])
@@ -189,7 +189,7 @@ async def on_message(message):
 async def setup_hook():
     for rem in bot.reminders:
         remind_at = datetime.fromisoformat(rem["remind_at"])
-        delay = (remind_at - datetime.utcnow()).total_seconds()
+        delay = (remind_at - datetime.now(timezone.utc)).total_seconds()
         if delay > 0:
             async def remind(rem):
                 await asyncio.sleep(delay)
@@ -226,7 +226,7 @@ async def sobes(ctx, *, text: str):
         return
     h_local, m_local = map(int, time_str.split(":"))
     h_utc, m_utc = local_to_utc(h_local, m_local)
-    now_utc = datetime.utcnow()
+    now_utc = datetime.now(timezone.utc)
     slot_dt = now_utc.replace(hour=h_utc, minute=m_utc, second=0, microsecond=0)
     if slot_dt < now_utc:
         await reject(ctx, "❌ Нельзя записаться на прошедшее время.")
