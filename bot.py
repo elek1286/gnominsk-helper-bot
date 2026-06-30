@@ -8,15 +8,14 @@ from datetime import datetime, timedelta
 import discord
 from discord.ext import commands
 
-# ---------- НАСТРОЙКИ (ЗАМЕНИ ЗДЕСЬ) ----------
+# ---------- НАСТРОЙКИ ----------
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 VOICE_CHANNEL_ID = 1435163969219334306  # ID голосового канала для обзвона, или None
 ALLOWED_ROLES = ["Временный лидер", "Зам начальника", "Зам создателя", "Создатель 🔧"]
-SLOT_DURATION = 15  # минут
+SLOT_DURATION = 15
 MUTE_DURATION = timedelta(minutes=30)
 VIOLATION_WINDOW = timedelta(minutes=5)
 
-# ---------- ФАЙЛЫ ----------
 REMINDERS_FILE = "reminders.json"
 INTERVIEWS_FILE = "interviews.json"
 VIOLATIONS_FILE = "violations.json"
@@ -54,7 +53,6 @@ def clean_old(interviews):
     cur = now.hour * 60 + now.minute
     return [s for s in interviews if (s["start"][0]*60 + s["start"][1] + SLOT_DURATION) > cur]
 
-# ---------- БОТ ----------
 intents = discord.Intents.default()
 intents.message_content = True
 bot = commands.Bot(command_prefix="!", intents=intents)
@@ -63,7 +61,6 @@ bot.interviews = load_json(INTERVIEWS_FILE, [])
 bot.violations = load_json(VIOLATIONS_FILE, {})
 bot.reminders = load_json(REMINDERS_FILE, [])
 
-# ---------- ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ----------
 def get_next_free(h, m):
     now = datetime.now()
     base = now.replace(hour=h, minute=m, second=0, microsecond=0)
@@ -97,18 +94,21 @@ async def reject(ctx, msg):
     bot.violations[uid] = {"count": cnt+1, "last_time": now_iso}
     save_json(VIOLATIONS_FILE, bot.violations)
 
-# ---------- ФОНОВАЯ ПРОВЕРКА УВЕДОМЛЕНИЙ (КАЖДЫЕ 30 СЕКУНД) ----------
 async def check_interviews_loop():
     await bot.wait_until_ready()
-    notified = set()  # чтобы не уведомлять дважды
+    notified = set()
+    print("[LOOP] check_interviews_loop started")
     while not bot.is_closed():
         now = datetime.now()
+        print(f"[LOOP] Checking at {now.strftime('%H:%M:%S')}, current slots: {len(bot.interviews)}")
         bot.interviews = clean_old(bot.interviews)
         for slot in bot.interviews[:]:
             slot_id = f"{slot['family']}-{slot['start'][0]:02d}-{slot['start'][1]:02d}"
             start_dt = now.replace(hour=slot["start"][0], minute=slot["start"][1], second=0, microsecond=0)
+            print(f"[LOOP]   Slot {slot_id}, start_dt={start_dt}, now={now}, should notify: {start_dt <= now and slot_id not in notified}")
             if start_dt <= now and slot_id not in notified:
                 channel = bot.get_channel(slot["channel_id"])
+                print(f"[LOOP]   Channel for {slot['channel_id']}: {channel}")
                 if channel:
                     if slot.get("type") == "обзвон":
                         vc = f"<#{VOICE_CHANNEL_ID}>" if VOICE_CHANNEL_ID else "голосовой канал"
@@ -116,11 +116,12 @@ async def check_interviews_loop():
                     else:
                         text = f"⏰ <@{slot['user_id']}>, начинается собеседование, заходите"
                     await channel.send(text)
-                    print(f"[{datetime.now().strftime('%H:%M:%S')}] Отправлено уведомление для {slot['family']} на {slot['start']}")
+                    print(f"[LOOP]   Sent notification for {slot['family']}")
+                else:
+                    print(f"[LOOP]   ERROR: Channel not found for id {slot['channel_id']}")
                 notified.add(slot_id)
         await asyncio.sleep(30)
 
-# ---------- СОБЫТИЯ БОТА ----------
 @bot.event
 async def on_ready():
     print(f"Бот {bot.user} готов!")
@@ -187,7 +188,6 @@ async def setup_hook():
                 save_json(REMINDERS_FILE, bot.reminders)
             bot.loop.create_task(remind(rem))
 
-# ---------- КОМАНДЫ ГОС. ВОЛНЫ ----------
 @bot.command()
 async def sobes(ctx, *, text: str):
     if not any(role.name in ALLOWED_ROLES for role in ctx.author.roles):
@@ -267,6 +267,5 @@ async def list(ctx):
         msg += f"**{s['family']}** — {h:02d}:{m:02d} ({t}) записал {uname}\n"
     await ctx.reply(msg, mention_author=False)
 
-# ---------- ЗАПУСК ----------
 if __name__ == "__main__":
     bot.run(TOKEN)
