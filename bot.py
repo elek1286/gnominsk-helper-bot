@@ -3,9 +3,6 @@ import asyncio
 import json
 import os
 import re
-import wave
-import struct
-import math
 from datetime import datetime, timedelta, timezone
 
 import discord
@@ -13,12 +10,12 @@ from discord.ext import commands
 
 # ---------- НАСТРОЙКИ ----------
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-VOICE_CHANNEL_ID = None
+VOICE_CHANNEL_ID = None  # ID голосового канала для обзвона, или None
 ALLOWED_ROLES = ["Гос. волна", "Лидер"]
-SLOT_DURATION = 15
+SLOT_DURATION = 15          # минут
 MUTE_DURATION = timedelta(minutes=30)
 MIN_BOOK_DELAY = timedelta(minutes=5)
-TIMEZONE_OFFSET_HOURS = 3
+TIMEZONE_OFFSET_HOURS = 3   # UTC+3 (Москва)
 
 # ---------- ФАЙЛЫ ----------
 REMINDERS_FILE = "reminders.json"
@@ -418,8 +415,8 @@ async def answer_exam(ctx, *, answer: str = None):
             f"_Ответьте командой_ `!ответ <ваш ответ>`"
         )
 
-# ---------- ВАЙБ 2018 (ГАРАНТИРОВАННО РАБОТАЕТ) ----------
- @bot.command(name="вайб")
+# ---------- ВАЙБ 2018 (ТОЛЬКО ЗЕЛЁНАЯ РАМКА, БЕЗ ЗВУКА) ----------
+@bot.command(name="вайб")
 async def vibe(ctx, year: str = None):
     if year != "2018":
         await ctx.send("Укажи год: `!вайб 2018`")
@@ -431,5 +428,13 @@ async def vibe(ctx, year: str = None):
     vc = await ctx.author.voice.channel.connect()
     await asyncio.sleep(5)   # 5 секунд бот в канале, рамка горит!
     await vc.disconnect()
+
+
+@bot.command(name="отключись")
+async def leave(ctx):
+    if ctx.guild.voice_client:
+        await ctx.guild.voice_client.disconnect()
+
 if __name__ == "__main__":
     bot.run(TOKEN)
+    
