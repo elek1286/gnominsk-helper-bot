@@ -1,5 +1,5 @@
 # -*- coding: utf-8 -*-
-import io.
+import io
 import asyncio
 import json
 import os
