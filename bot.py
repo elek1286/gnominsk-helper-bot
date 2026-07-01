@@ -1,5 +1,4 @@
 # -*- coding: utf-8 -*-
-import io
 import asyncio
 import json
 import os
@@ -366,6 +365,62 @@ async def start_exam(ctx, variant: str = None):
         f"_Ответьте командой_ `!ответ <ваш ответ>`"
     )
 
+@bot.command(name="ответ")
+async def answer_exam(ctx, *, answer: str = None):
+    user_id = ctx.author.id
+    if user_id not in bot.active_exams:
+        return
+    exam = bot.active_exams[user_id]
+    if ctx.channel.id != exam["channel_id"]:
+        return
+
+    if answer is None:
+        await ctx.send("Укажите ваш ответ: `!ответ <текст>`")
+        return
+
+    q = exam["questions"][exam["current"]]
+
+    # Определяем список правильных ответов
+    if "answers" in q:
+        correct_answers = [a.strip().lower() for a in q["answers"]]
+    else:
+        correct_answers = [q["answer"].strip().lower()]
+
+    user_answer = answer.strip().lower()
+
+    if user_answer in correct_answers:
+        exam["correct"] += 1
+        pts = q.get("points", 1)
+        exam["points"] += pts
+
+    exam["current"] += 1
+    if exam["current"] >= exam["total"]:
+        correct = exam["correct"]
+        total = exam["total"]
+        score = exam["points"]
+        max_score = exam["max_points"]
+        if correct >= exam["pass_threshold"]:
+            result_text = "Обзвон пройден"
+        else:
+            result_text = "Вы не прошли обзвон"
+        await ctx.send(
+            f"**Обзвон завершён!**\n"
+            f"Правильных ответов: {correct} из {total} (нужно ≥ {exam['pass_threshold']})\n"
+            f"Набрано баллов: {score} из {max_score}\n"
+            f"Результат: **{result_text}**"
+        )
+        del bot.active_exams[user_id]
+    else:
+        next_q = exam["questions"][exam["current"]]
+        pts = next_q.get("points", 1)
+        q_number = next_q.get("number", exam["current"]+1)
+        await ctx.send(
+            f"Понял, дальше\n"
+            f"**Вопрос {q_number}/{exam['total']}** ({pts} балл.): {next_q['question']}\n"
+            f"_Ответьте командой_ `!ответ <ваш ответ>`"
+        )
+
+# ---------- ВАЙБ 2018 (БИТ) ----------
 @bot.command(name="вайб")
 async def vibe(ctx, year: str = None):
     if year != "2018":
@@ -375,41 +430,47 @@ async def vibe(ctx, year: str = None):
         await ctx.send("Зайди в голосовой канал!")
         return
 
+    # Если бита ещё нет, создаём его средствами Python (не нужен ffmpeg)
+    if not os.path.exists("beat.wav"):
+        import wave
+        import struct
+        import math
+        sample_rate = 48000
+        beep_duration = 0.15
+        pause_duration = 0.1
+        freq = 80
+        num_beeps = 7
+        total_beep_samples = int(sample_rate * beep_duration)
+        total_pause_samples = int(sample_rate * pause_duration)
+        with wave.open("beat.wav", "w") as f:
+            f.setnchannels(1)       # моно
+            f.setsampwidth(2)       # 16 бит
+            f.setframerate(sample_rate)
+            frames = []
+            for _ in range(num_beeps):
+                # гудок
+                for i in range(total_beep_samples):
+                    sample = int(32767 * 0.5 * math.sin(2 * math.pi * freq * i / sample_rate))
+                    frames.append(struct.pack('<h', sample))
+                # пауза
+                for _ in range(total_pause_samples):
+                    frames.append(struct.pack('<h', 0))
+            f.writeframes(b''.join(frames))
+
+    # Проигрываем готовый beat.wav через ffmpeg (он уже установлен)
     vc = await ctx.author.voice.channel.connect()
-
-    import struct, math, io
-
-    sample_rate = 48000
-    beep_duration = 0.15   # секунд
-    pause_duration = 0.1
-    num_beeps = 7
-    freq = 80
-    amplitude = 0.5        # громкость
-
-    # Считаем общую длину в сэмплах
-    total_beep_samples = int(sample_rate * beep_duration)
-    total_pause_samples = int(sample_rate * pause_duration)
-
-    # Генерируем PCM (16-бит, стерео)
-    pcm_data = bytearray()
-    for _ in range(num_beeps):
-        # гудок
-        for i in range(total_beep_samples):
-            sample = int(32767 * amplitude * math.sin(2 * math.pi * freq * i / sample_rate))
-            # stereo: левый = правый = sample
-            pcm_data.extend(struct.pack('<hh', sample, sample))
-        # пауза
-        for _ in range(total_pause_samples):
-            pcm_data.extend(b'\x00\x00\x00\x00')  # тишина стерео
-
-    # Общая длительность ~3 секунды, можно не добивать
-
-    # Проигрываем как PCM стерео 48000 Гц
-    source = discord.PCMAudio(io.BytesIO(pcm_data), channels=2, sample_rate=sample_rate)
+    source = discord.FFmpegPCMAudio("beat.wav")
     vc.play(source)
-
     while vc.is_playing():
         await asyncio.sleep(1)
     await vc.disconnect()
+
+
+@bot.command(name="отключись")
+async def leave(ctx):
+    if ctx.guild.voice_client:
+        await ctx.guild.voice_client.disconnect()
+
 if __name__ == "__main__":
     bot.run(TOKEN)
+    
