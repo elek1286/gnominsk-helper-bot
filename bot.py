@@ -430,46 +430,23 @@ async def vibe(ctx, year: str = None):
         await ctx.send("Зайди в голосовой канал!")
         return
 
-    # Если бита ещё нет, создаём его средствами Python (не нужен ffmpeg)
-    if not os.path.exists("beat.wav"):
-        import wave
-        import struct
-        import math
-        sample_rate = 48000
-        beep_duration = 0.15
-        pause_duration = 0.1
-        freq = 80
-        num_beeps = 7
-        total_beep_samples = int(sample_rate * beep_duration)
-        total_pause_samples = int(sample_rate * pause_duration)
-        with wave.open("beat.wav", "w") as f:
-            f.setnchannels(1)       # моно
-            f.setsampwidth(2)       # 16 бит
-            f.setframerate(sample_rate)
-            frames = []
-            for _ in range(num_beeps):
-                # гудок
-                for i in range(total_beep_samples):
-                    sample = int(32767 * 0.5 * math.sin(2 * math.pi * freq * i / sample_rate))
-                    frames.append(struct.pack('<h', sample))
-                # пауза
-                for _ in range(total_pause_samples):
-                    frames.append(struct.pack('<h', 0))
-            f.writeframes(b''.join(frames))
-
-    # Проигрываем готовый beat.wav через ffmpeg (он уже установлен)
     vc = await ctx.author.voice.channel.connect()
-    source = discord.FFmpegPCMAudio("beat.wav")
+
+    # Генерируем 3 секунды тишины (стерео, 48000 Гц)
+    import struct, io
+    sample_rate = 48000
+    duration = 3.0  # секунд
+    num_samples = int(sample_rate * duration)
+    silence = b'\x00\x00\x00\x00' * num_samples  # тишина стерео (левый + правый = нули)
+
+    # Проигрываем тишину через PCMAudio (не требует ffmpeg)
+    source = discord.PCMAudio(io.BytesIO(silence), channels=2, sample_rate=sample_rate)
     vc.play(source)
+
     while vc.is_playing():
         await asyncio.sleep(1)
     await vc.disconnect()
 
-
-@bot.command(name="отключись")
-async def leave(ctx):
-    if ctx.guild.voice_client:
-        await ctx.guild.voice_client.disconnect()
 
 if __name__ == "__main__":
     bot.run(TOKEN)
