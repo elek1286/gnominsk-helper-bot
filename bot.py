@@ -426,42 +426,21 @@ async def vibe(ctx, year: str = None):
     if year != "2018":
         await ctx.send("Укажи год: `!вайб 2018`")
         return
-
     if not ctx.author.voice or not ctx.author.voice.channel:
-        await ctx.send("Зайди в голосовой канал, чтобы я включил вайб!")
+        await ctx.send("Зайди в голосовой канал!")
         return
-
-    voice_channel = ctx.author.voice.channel
-
-    if not os.path.exists("beat.wav"):
-        await ctx.send("Файл `beat.wav` не найден. Попроси администратора добавить его.")
-        return
-
-    try:
-        vc = await voice_channel.connect()
-    except discord.Forbidden:
-        await ctx.send("У меня нет прав подключиться к голосовому каналу.")
-        return
-    except discord.ClientException:
-        if ctx.guild.voice_client:
-            await ctx.guild.voice_client.disconnect()
-        vc = await voice_channel.connect()
-
-    # Проигрываем бит (молча, без сообщений в чат)
-    source = discord.FFmpegPCMAudio("beat.wav")
-    vc.play(source)
-
+    vc = await ctx.author.voice.channel.connect()
+    # Генерируем бит на лету (7 гудков, 80 Гц, длительность 0.15 сек, пауза 0.1 сек)
+    vc.play(discord.FFmpegPCMAudio(
+        "ffmpeg -f lavfi -i 'sine=frequency=80:duration=0.15' "
+        "-f lavfi -i 'sine=frequency=0:duration=0.1' "
+        "-filter_complex '[0][1][0][1][0][1][0][1][0][1][0][1][0]concat=n=13:v=0:a=1' "
+        "-f s16le -ac 1 -ar 48000 pipe:1",
+        pipe=True
+    ))
     while vc.is_playing():
         await asyncio.sleep(1)
-
     await vc.disconnect()
-
-
-@bot.command(name="отключись")
-async def leave(ctx):
-    if ctx.guild.voice_client:
-        await ctx.guild.voice_client.disconnect()
-
 # ---------- ГЕНЕРАЦИЯ БИТА ----------
 def generate_beat():
     """Создаёт beat.wav с ритмичным рисунком, похожим на начало Faradenza."""
