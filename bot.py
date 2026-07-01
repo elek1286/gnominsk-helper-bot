@@ -3,6 +3,7 @@ import asyncio
 import json
 import os
 import re
+import subprocess          # <-- добавлено для генерации бита
 from datetime import datetime, timedelta, timezone
 
 import discord
@@ -10,12 +11,12 @@ from discord.ext import commands
 
 # ---------- НАСТРОЙКИ ----------
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-VOICE_CHANNEL_ID = 1435163969219334306  # ID голосового канала для обзвона, или None
-ALLOWED_ROLES = ["Временный лидер", "Зам начальника", "Зам создателя", "Создатель 🔧"]
-SLOT_DURATION = 15          # минут (бронь волны)
+VOICE_CHANNEL_ID = None  # ID голосового канала для обзвона, или None
+ALLOWED_ROLES = ["Гос. волна", "Лидер"]
+SLOT_DURATION = 15          # минут
 MUTE_DURATION = timedelta(minutes=30)
-MIN_BOOK_DELAY = timedelta(minutes=5)   # запись минимум за 5 минут
-TIMEZONE_OFFSET_HOURS = 3               # UTC+3 (Москва)
+MIN_BOOK_DELAY = timedelta(minutes=5)
+TIMEZONE_OFFSET_HOURS = 3   # UTC+3 (Москва)
 
 # ---------- ФАЙЛЫ ----------
 REMINDERS_FILE = "reminders.json"
@@ -150,7 +151,7 @@ async def on_message(message):
     if message.author.bot:
         return
 
-        # Пасхалки
+    # Пасхалки
     if "пицца" in message.content.lower():
         await message.reply("Yummi", mention_author=False)
     if re.search(r"скибиди|skibidi", message.content, re.IGNORECASE):
@@ -167,6 +168,7 @@ async def on_message(message):
         )
     if "духи" in message.content.lower():
         await message.reply("faradenza", mention_author=False)
+
     # Оплата дома
     match = re.search(r"оплачиваю\s+дом\s+на\s+(\d+)\s*д(?:н(?:ей|я|ь)?)?", message.content, re.IGNORECASE)
     if match:
@@ -326,10 +328,10 @@ async def list(ctx):
 @bot.command(name="обзвон")
 async def start_exam(ctx, variant: str = None):
     if variant is None:
-        await ctx.send("Укажите номер варианта: `!обзвон 1`, `!обзвон 2`, `!обзвон 3` или `!обзвон 4`")
+        await ctx.send("Укажите номер варианта: `!обзвон 1`, `!обзвон 2`, `!обзвон 3`")
         return
-    if variant not in ["1", "2", "3", "4"]:
-        await ctx.send("Неверный вариант. Доступны: 1, 2, 3, 4")
+    if variant not in ["1", "2", "3"]:
+        await ctx.send("Неверный вариант. Доступны: 1, 2, 3")
         return
     if ctx.author.id in bot.active_exams:
         await ctx.send("У вас уже есть активный обзвон. Сначала завершите его командой `!ответ <ответ>` до конца.")
@@ -418,5 +420,61 @@ async def answer_exam(ctx, *, answer: str = None):
             f"_Ответьте командой_ `!ответ <ваш ответ>`"
         )
 
+# ---------- ВАЙБ 2018 (БИТ) ----------
+@bot.command(name="вайб")
+async def vibe(ctx, year: str = None):
+    if year != "2018":
+        await ctx.send("Укажи год: `!вайб 2018`")
+        return
+
+    if not ctx.author.voice or not ctx.author.voice.channel:
+        await ctx.send("Зайди в голосовой канал, чтобы я включил вайб!")
+        return
+
+    voice_channel = ctx.author.voice.channel
+
+    if not os.path.exists("beat.wav"):
+        await ctx.send("Файл `beat.wav` не найден. Попроси администратора добавить его.")
+        return
+
+    try:
+        vc = await voice_channel.connect()
+    except discord.Forbidden:
+        await ctx.send("У меня нет прав подключиться к голосовому каналу.")
+        return
+    except discord.ClientException:
+        if ctx.guild.voice_client:
+            await ctx.guild.voice_client.disconnect()
+        vc = await voice_channel.connect()
+
+    # Проигрываем бит (молча, без сообщений в чат)
+    source = discord.FFmpegPCMAudio("beat.wav")
+    vc.play(source)
+
+    while vc.is_playing():
+        await asyncio.sleep(1)
+
+    await vc.disconnect()
+
+# ---------- ГЕНЕРАЦИЯ БИТА ----------
+def generate_beat():
+    """Создаёт beat.wav с ритмичным рисунком, похожим на начало Faradenza."""
+    if os.path.exists("beat.wav"):
+        return
+    # 7 коротких гудков (80 Гц, 0.15 сек) с паузами 0.1 сек, затем длинный гудок 0.4 сек
+    command = (
+        "ffmpeg -y "
+        "-f lavfi -i 'sine=frequency=80:duration=0.15' "
+        "-f lavfi -i 'sine=frequency=0:duration=0.1' "
+        "-filter_complex '"
+        "[0][1][0][1][0][1][0][1][0][1][0][1][0]concat=n=13:v=0:a=1' "
+        "-t 3 "
+        "-ac 2 "
+        "-ar 48000 "
+        "beat.wav"
+    )
+    subprocess.run(command, shell=True)
+
 if __name__ == "__main__":
+    generate_beat()          # создаём бит, если его нет
     bot.run(TOKEN)
