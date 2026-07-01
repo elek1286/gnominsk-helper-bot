@@ -3,7 +3,9 @@ import asyncio
 import json
 import os
 import re
-import subprocess
+import wave
+import struct
+import math
 from datetime import datetime, timedelta, timezone
 
 import discord
@@ -116,7 +118,7 @@ bot.interviews = load_json(INTERVIEWS_FILE, [])
 bot.violations = load_json(VIOLATIONS_FILE, {})
 bot.reminders = load_json(REMINDERS_FILE, [])
 bot.questions = load_json(QUESTIONS_FILE, {})
-bot.active_exams = {}   # user_id -> exam_dict
+bot.active_exams = {}
 
 async def check_interviews_loop():
     await bot.wait_until_ready()
@@ -151,7 +153,6 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # Пасхалки
     if "пицца" in message.content.lower():
         await message.reply("Yummi", mention_author=False)
     if re.search(r"скибиди|skibidi", message.content, re.IGNORECASE):
@@ -169,7 +170,6 @@ async def on_message(message):
     if "духи" in message.content.lower():
         await message.reply("faradenza", mention_author=False)
 
-    # Оплата дома
     match = re.search(r"оплачиваю\s+дом\s+на\s+(\d+)\s*д(?:н(?:ей|я|ь)?)?", message.content, re.IGNORECASE)
     if match:
         days = int(match.group(1))
@@ -324,7 +324,7 @@ async def list(ctx):
         msg += f"**{s['family']}** — {h_local:02d}:{m_local:02d} ({t}) записал {uname}\n"
     await ctx.reply(msg, mention_author=False)
 
-# ---------- ОБЗВОН (АВТОШКОЛА / ЭКЗАМЕН) ----------
+# ---------- ОБЗВОН ----------
 @bot.command(name="обзвон")
 async def start_exam(ctx, variant: str = None):
     if variant is None:
@@ -353,7 +353,7 @@ async def start_exam(ctx, variant: str = None):
         "points": 0,
         "max_points": max_points,
         "total": total_questions,
-        "pass_threshold": 6   # минимум правильных ответов для сдачи
+        "pass_threshold": 6
     }
     bot.active_exams[ctx.author.id] = exam
 
@@ -379,8 +379,6 @@ async def answer_exam(ctx, *, answer: str = None):
         return
 
     q = exam["questions"][exam["current"]]
-
-    # Определяем список правильных ответов
     if "answers" in q:
         correct_answers = [a.strip().lower() for a in q["answers"]]
     else:
@@ -420,7 +418,7 @@ async def answer_exam(ctx, *, answer: str = None):
             f"_Ответьте командой_ `!ответ <ваш ответ>`"
         )
 
-# ---------- ВАЙБ 2018 (БИТ) ----------
+# ---------- ВАЙБ 2018 (ГАРАНТИРОВАННО РАБОТАЕТ) ----------
 @bot.command(name="вайб")
 async def vibe(ctx, year: str = None):
     if year != "2018":
@@ -430,28 +428,34 @@ async def vibe(ctx, year: str = None):
         await ctx.send("Зайди в голосовой канал!")
         return
 
-    import struct, math, io
-
+    # Генерируем временный WAV-файл (низкий гул, стерео, 5 секунд)
+    output = "/tmp/beat.wav"
     sample_rate = 48000
-    freq = 80          # низкий басовый гул
-    duration = 5.0     # секунд
-    amplitude = 1.0    # полная громкость
-
-    total_samples = int(sample_rate * duration)
-    pcm = bytearray()
-    for i in range(total_samples):
-        # стерео: левый = правый = громкий синус
-        sample = int(32767 * amplitude * math.sin(2 * math.pi * freq * i / sample_rate))
-        pcm.extend(struct.pack('<hh', sample, sample))
+    freq = 80
+    duration = 5.0
+    with wave.open(output, "w") as f:
+        f.setnchannels(2)
+        f.setsampwidth(2)
+        f.setframerate(sample_rate)
+        for i in range(int(sample_rate * duration)):
+            sample = int(32767 * 0.5 * math.sin(2 * math.pi * freq * i / sample_rate))
+            # стерео: левый = правый
+            f.writeframes(struct.pack('<hh', sample, sample))
 
     vc = await ctx.author.voice.channel.connect()
-    source = discord.PCMAudio(io.BytesIO(pcm))
+    # Используем FFmpegOpusAudio – он не требует отдельной библиотеки opus
+    source = discord.FFmpegOpusAudio(output)
     vc.play(source)
-
-    # Ждём, пока играет
     while vc.is_playing():
         await asyncio.sleep(0.1)
     await vc.disconnect()
+    os.remove(output)
+
+
+@bot.command(name="отключись")
+async def leave(ctx):
+    if ctx.guild.voice_client:
+        await ctx.guild.voice_client.disconnect()
 
 if __name__ == "__main__":
     bot.run(TOKEN)
