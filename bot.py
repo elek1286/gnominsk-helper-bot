@@ -420,7 +420,6 @@ async def answer_exam(ctx, *, answer: str = None):
             f"_Ответьте командой_ `!ответ <ваш ответ>`"
         )
 
-# ---------- ВАЙБ 2018 (БИТ) ----------
 @bot.command(name="вайб")
 async def vibe(ctx, year: str = None):
     if year != "2018":
@@ -431,7 +430,7 @@ async def vibe(ctx, year: str = None):
         return
     vc = await ctx.author.voice.channel.connect()
     output_path = "/tmp/beat.wav"
-    # Генерируем бит (7 гудков 80 Гц, длительность 0.15 сек, пауза 0.1 сек)
+    # Генерируем правильный WAV (7 гудков 80 Гц, длительность 0.15 сек, пауза 0.1 сек)
     cmd = (
         "ffmpeg -y "
         "-f lavfi -i 'sine=frequency=80:duration=0.15' "
@@ -440,20 +439,23 @@ async def vibe(ctx, year: str = None):
         "-t 3 "
         "-ac 1 "
         "-ar 48000 "
+        "-f wav "          # <-- гарантирует корректный WAV-заголовок
         f"{output_path}"
     )
-    subprocess.run(cmd, shell=True)
-    if os.path.exists(output_path):
+    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
+    if result.returncode != 0:
+        await ctx.send("❌ Не удалось сгенерировать бит. Ошибка ffmpeg:")
+        await ctx.send(f"```{result.stderr[:500]}```")
+        await vc.disconnect()
+        return
+
+    if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
         vc.play(discord.FFmpegPCMAudio(output_path))
         while vc.is_playing():
             await asyncio.sleep(1)
         os.remove(output_path)
+    else:
+        await ctx.send("❌ Бит не создался. Попробуй позже.")
     await vc.disconnect()
-
-@bot.command(name="отключись")
-async def leave(ctx):
-    if ctx.guild.voice_client:
-        await ctx.guild.voice_client.disconnect()
-
 if __name__ == "__main__":
     bot.run(TOKEN)
