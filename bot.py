@@ -3,7 +3,7 @@ import asyncio
 import json
 import os
 import re
-import subprocess          # <-- добавлено для генерации бита
+import subprocess
 from datetime import datetime, timedelta, timezone
 
 import discord
@@ -430,36 +430,30 @@ async def vibe(ctx, year: str = None):
         await ctx.send("Зайди в голосовой канал!")
         return
     vc = await ctx.author.voice.channel.connect()
-    # Генерируем бит на лету (7 гудков, 80 Гц, длительность 0.15 сек, пауза 0.1 сек)
-    vc.play(discord.FFmpegPCMAudio(
-        "ffmpeg -f lavfi -i 'sine=frequency=80:duration=0.15' "
-        "-f lavfi -i 'sine=frequency=0:duration=0.1' "
-        "-filter_complex '[0][1][0][1][0][1][0][1][0][1][0][1][0]concat=n=13:v=0:a=1' "
-        "-f s16le -ac 1 -ar 48000 pipe:1",
-        pipe=True
-    ))
-    while vc.is_playing():
-        await asyncio.sleep(1)
-    await vc.disconnect()
-# ---------- ГЕНЕРАЦИЯ БИТА ----------
-def generate_beat():
-    """Создаёт beat.wav с ритмичным рисунком, похожим на начало Faradenza."""
-    if os.path.exists("beat.wav"):
-        return
-    # 7 коротких гудков (80 Гц, 0.15 сек) с паузами 0.1 сек, затем длинный гудок 0.4 сек
-    command = (
+    output_path = "/tmp/beat.wav"
+    # Генерируем бит (7 гудков 80 Гц, длительность 0.15 сек, пауза 0.1 сек)
+    cmd = (
         "ffmpeg -y "
         "-f lavfi -i 'sine=frequency=80:duration=0.15' "
         "-f lavfi -i 'sine=frequency=0:duration=0.1' "
-        "-filter_complex '"
-        "[0][1][0][1][0][1][0][1][0][1][0][1][0]concat=n=13:v=0:a=1' "
+        "-filter_complex '[0][1][0][1][0][1][0][1][0][1][0][1][0]concat=n=13:v=0:a=1' "
         "-t 3 "
-        "-ac 2 "
+        "-ac 1 "
         "-ar 48000 "
-        "beat.wav"
+        f"{output_path}"
     )
-    subprocess.run(command, shell=True)
+    subprocess.run(cmd, shell=True)
+    if os.path.exists(output_path):
+        vc.play(discord.FFmpegPCMAudio(output_path))
+        while vc.is_playing():
+            await asyncio.sleep(1)
+        os.remove(output_path)
+    await vc.disconnect()
+
+@bot.command(name="отключись")
+async def leave(ctx):
+    if ctx.guild.voice_client:
+        await ctx.guild.voice_client.disconnect()
 
 if __name__ == "__main__":
-    generate_beat()          # создаём бит, если его нет
     bot.run(TOKEN)
