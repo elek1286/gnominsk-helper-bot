@@ -430,8 +430,27 @@ async def vibe(ctx, year: str = None):
         await ctx.send("Зайди в голосовой канал!")
         return
 
+    import struct, math, io
+
+    sample_rate = 48000
+    freq = 80          # низкий басовый гул
+    duration = 5.0     # секунд
+    amplitude = 1.0    # полная громкость
+
+    total_samples = int(sample_rate * duration)
+    pcm = bytearray()
+    for i in range(total_samples):
+        # стерео: левый = правый = громкий синус
+        sample = int(32767 * amplitude * math.sin(2 * math.pi * freq * i / sample_rate))
+        pcm.extend(struct.pack('<hh', sample, sample))
+
     vc = await ctx.author.voice.channel.connect()
-    await asyncio.sleep(5)   # 5 секунд рамка зелёная
+    source = discord.PCMAudio(io.BytesIO(pcm))
+    vc.play(source)
+
+    # Ждём, пока играет
+    while vc.is_playing():
+        await asyncio.sleep(0.1)
     await vc.disconnect()
 
 if __name__ == "__main__":
