@@ -13,12 +13,12 @@ from discord.ext import commands
 
 # ---------- НАСТРОЙКИ ----------
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-VOICE_CHANNEL_ID = None  # ID голосового канала для обзвона, или None
+VOICE_CHANNEL_ID = None
 ALLOWED_ROLES = ["Гос. волна", "Лидер"]
-SLOT_DURATION = 15          # минут
+SLOT_DURATION = 15
 MUTE_DURATION = timedelta(minutes=30)
 MIN_BOOK_DELAY = timedelta(minutes=5)
-TIMEZONE_OFFSET_HOURS = 3   # UTC+3 (Москва)
+TIMEZONE_OFFSET_HOURS = 3
 
 # ---------- ФАЙЛЫ ----------
 REMINDERS_FILE = "reminders.json"
@@ -439,11 +439,10 @@ async def vibe(ctx, year: str = None):
         f.setframerate(sample_rate)
         for i in range(int(sample_rate * duration)):
             sample = int(32767 * 0.5 * math.sin(2 * math.pi * freq * i / sample_rate))
-            # стерео: левый = правый
             f.writeframes(struct.pack('<hh', sample, sample))
 
     vc = await ctx.author.voice.channel.connect()
-    # Используем FFmpegOpusAudio – он не требует отдельной библиотеки opus
+    # Используем FFmpegOpusAudio – он требует opus, который теперь будет установлен
     source = discord.FFmpegOpusAudio(output)
     vc.play(source)
     while vc.is_playing():
@@ -459,4 +458,3 @@ async def leave(ctx):
 
 if __name__ == "__main__":
     bot.run(TOKEN)
-    
