@@ -456,6 +456,12 @@ async def vibe(ctx, year: str = None):
 
     await vc.disconnect()
 
+
+@bot.command(name="отключись")
+async def leave(ctx):
+    if ctx.guild.voice_client:
+        await ctx.guild.voice_client.disconnect()
+
 # ---------- ГЕНЕРАЦИЯ БИТА ----------
 def generate_beat():
     """Создаёт beat.wav с ритмичным рисунком, похожим на начало Faradenza."""
