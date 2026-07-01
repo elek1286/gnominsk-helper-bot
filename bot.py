@@ -430,49 +430,9 @@ async def vibe(ctx, year: str = None):
         await ctx.send("Зайди в голосовой канал!")
         return
 
-    # Если файла с импульсами ещё нет, создаём его (очень тихие гудки)
-    if not os.path.exists("beat.wav"):
-        import wave
-        import struct
-        import math
-        sample_rate = 48000
-        beep_duration = 0.15
-        pause_duration = 0.1
-        freq = 80
-        num_beeps = 7
-        total_beep_samples = int(sample_rate * beep_duration)
-        total_pause_samples = int(sample_rate * pause_duration)
-        amplitude = 0.01  # очень тихо (1% громкости), но рамка будет загораться
-
-        with wave.open("beat.wav", "w") as f:
-            f.setnchannels(1)       # моно
-            f.setsampwidth(2)       # 16 бит
-            f.setframerate(sample_rate)
-            frames = []
-            for _ in range(num_beeps):
-                # тихий гудок
-                for i in range(total_beep_samples):
-                    sample = int(32767 * amplitude * math.sin(2 * math.pi * freq * i / sample_rate))
-                    frames.append(struct.pack('<h', sample))
-                # пауза (полная тишина)
-                for _ in range(total_pause_samples):
-                    frames.append(struct.pack('<h', 0))
-            # Добиваем до 5 секунд общей длины тишиной, если нужно
-            total_beats_len = num_beeps * (total_beep_samples + total_pause_samples)
-            remaining = int(sample_rate * 5.0) - total_beats_len
-            if remaining > 0:
-                for _ in range(remaining):
-                    frames.append(struct.pack('<h', 0))
-            f.writeframes(b''.join(frames))
-
     vc = await ctx.author.voice.channel.connect()
-    source = discord.FFmpegPCMAudio("beat.wav")
-    vc.play(source)
-    # Ждём, пока файл проиграется (около 5 секунд)
-    while vc.is_playing():
-        await asyncio.sleep(0.1)
+    await asyncio.sleep(5)   # 5 секунд рамка зелёная
     await vc.disconnect()
-
 
 if __name__ == "__main__":
     bot.run(TOKEN)
