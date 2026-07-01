@@ -420,6 +420,7 @@ async def answer_exam(ctx, *, answer: str = None):
             f"_Ответьте командой_ `!ответ <ваш ответ>`"
         )
 
+# ---------- ВАЙБ 2018 (БИТ) ----------
 @bot.command(name="вайб")
 async def vibe(ctx, year: str = None):
     if year != "2018":
@@ -429,33 +430,38 @@ async def vibe(ctx, year: str = None):
         await ctx.send("Зайди в голосовой канал!")
         return
     vc = await ctx.author.voice.channel.connect()
-    output_path = "/tmp/beat.wav"
-    # Генерируем правильный WAV (7 гудков 80 Гц, длительность 0.15 сек, пауза 0.1 сек)
-    cmd = (
-        "ffmpeg -y "
-        "-f lavfi -i 'sine=frequency=80:duration=0.15' "
-        "-f lavfi -i 'sine=frequency=0:duration=0.1' "
-        "-filter_complex '[0][1][0][1][0][1][0][1][0][1][0][1][0]concat=n=13:v=0:a=1' "
-        "-t 3 "
-        "-ac 1 "
-        "-ar 48000 "
-        "-f wav "          # <-- гарантирует корректный WAV-заголовок
-        f"{output_path}"
-    )
-    result = subprocess.run(cmd, shell=True, capture_output=True, text=True)
-    if result.returncode != 0:
-        await ctx.send("❌ Не удалось сгенерировать бит. Ошибка ffmpeg:")
-        await ctx.send(f"```{result.stderr[:500]}```")
-        await vc.disconnect()
-        return
 
-    if os.path.exists(output_path) and os.path.getsize(output_path) > 0:
-        vc.play(discord.FFmpegPCMAudio(output_path))
-        while vc.is_playing():
-            await asyncio.sleep(1)
-        os.remove(output_path)
-    else:
-        await ctx.send("❌ Бит не создался. Попробуй позже.")
+    # Генерируем бит "ту-ту-ту" прямо в памяти (Python, без ffmpeg)
+    import struct, math, io
+
+    sample_rate = 48000
+    duration = 3.0  # секунды
+    freq = 80       # низкий гул
+    beep_duration = 0.15   # длительность одного гудка
+    pause_duration = 0.1   # пауза между гудками
+    num_beeps = 7          # количество гудков
+
+    pcm_data = bytearray()
+    for _ in range(num_beeps):
+        # гудок
+        for i in range(int(sample_rate * beep_duration)):
+            sample = int(32767 * 0.5 * math.sin(2 * math.pi * freq * i / sample_rate))
+            pcm_data.extend(struct.pack('<h', sample))
+        # пауза
+        silence_samples = int(sample_rate * pause_duration)
+        pcm_data.extend(b'\x00\x00' * silence_samples)
+
+    # Добиваем тишиной до общей длительности, если нужно
+    remaining_samples = int(sample_rate * duration) - (len(pcm_data) // 2)
+    if remaining_samples > 0:
+        pcm_data.extend(b'\x00\x00' * remaining_samples)
+
+    # Проигрываем PCM через встроенный проигрыватель (не требует ffmpeg)
+    source = discord.PCMAudio(io.BytesIO(pcm_data))
+    vc.play(source)
+
+    while vc.is_playing():
+        await asyncio.sleep(1)
     await vc.disconnect()
 if __name__ == "__main__":
     bot.run(TOKEN)
