@@ -3,6 +3,9 @@ import asyncio
 import json
 import os
 import re
+import wave
+import struct
+import math
 from datetime import datetime, timedelta, timezone
 
 import discord
@@ -415,7 +418,7 @@ async def answer_exam(ctx, *, answer: str = None):
             f"_Ответьте командой_ `!ответ <ваш ответ>`"
         )
 
-# ---------- ВАЙБ 2018 (ТОЛЬКО ЗЕЛЁНАЯ РАМКА, БЕЗ ЗВУКА) ----------
+# ---------- ВАЙБ 2018 (ГАРАНТИРОВАННО ЗАЖЖЁТ РАМКУ) ----------
 @bot.command(name="вайб")
 async def vibe(ctx, year: str = None):
     if year != "2018":
@@ -425,9 +428,27 @@ async def vibe(ctx, year: str = None):
         await ctx.send("Зайди в голосовой канал!")
         return
 
+    # Генерируем временный WAV-файл (низкий гул, стерео, 5 секунд)
+    output = "/tmp/beat.wav"
+    sample_rate = 48000
+    freq = 80
+    duration = 5.0
+    with wave.open(output, "w") as f:
+        f.setnchannels(2)
+        f.setsampwidth(2)
+        f.setframerate(sample_rate)
+        for i in range(int(sample_rate * duration)):
+            sample = int(32767 * 0.5 * math.sin(2 * math.pi * freq * i / sample_rate))
+            f.writeframes(struct.pack('<hh', sample, sample))
+
     vc = await ctx.author.voice.channel.connect()
-    await asyncio.sleep(5)   # 5 секунд бот в канале, рамка горит!
+    # Используем FFmpegOpusAudio – opus теперь установлен
+    source = discord.FFmpegOpusAudio(output)
+    vc.play(source)
+    while vc.is_playing():
+        await asyncio.sleep(0.1)
     await vc.disconnect()
+    os.remove(output)
 
 
 @bot.command(name="отключись")
