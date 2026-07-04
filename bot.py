@@ -513,8 +513,6 @@ async def leave(ctx):
     if ctx.guild.voice_client:
         await ctx.guild.voice_client.disconnect()
 
-if __name__ == "__main__":
-    bot.run(TOKEN)t()
 
 if __name__ == "__main__":
     bot.run(TOKEN)
