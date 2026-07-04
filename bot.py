@@ -14,8 +14,9 @@ from discord.ext import commands
 # ---------- НАСТРОЙКИ ----------
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 VOICE_CHANNEL_ID = None  # ID голосового канала для обзвона, или None
+GOSSIP_CHANNEL_ID = None  # ID канала "подслушано"
 
-# Роли, которым разрешено управлять гос. волной (!sobes, !cancel)
+# Роли для гос. волны
 ALLOWED_ROLES = [
     "Зам создателя",
     "Зам начальника",
@@ -23,7 +24,7 @@ ALLOWED_ROLES = [
     "Создатель 🔧"
 ]
 
-# Роли, которым разрешено чистить сообщения (!очистить)
+# Роли для очистки сообщений
 CLEAR_ROLES = [
     "Создатель 🔧",
     "Зам создателя"
@@ -338,10 +339,8 @@ async def list(ctx):
         msg += f"**{s['family']}** — {h_local:02d}:{m_local:02d} ({t}) записал {uname}\n"
     await ctx.reply(msg, mention_author=False)
 
-# ---------- ОЧИСТКА СООБЩЕНИЙ ----------
 @bot.command(name="очистить")
 async def clear(ctx, amount: int = 10):
-    """Удаляет указанное количество сообщений. Только для CLEAR_ROLES."""
     if not any(role.name in CLEAR_ROLES for role in ctx.author.roles):
         await ctx.send("❌ У вас нет прав на очистку сообщений.", delete_after=5)
         return
@@ -350,6 +349,40 @@ async def clear(ctx, amount: int = 10):
         return
     deleted = await ctx.channel.purge(limit=amount + 1)
     await ctx.send(f"🧹 Удалено {len(deleted) - 1} сообщений.", delete_after=5)
+
+# ---------- ПОДСЛУШАНО ----------
+@bot.command(name="подслушано")
+async def gossip(ctx, *, text: str = None):
+    if not text:
+        await ctx.send("Используй: `!подслушано текст` или `!подслушано анонимно текст`")
+        return
+    if GOSSIP_CHANNEL_ID is None:
+        await ctx.send("Канал подслушано не настроен.")
+        return
+    target = bot.get_channel(GOSSIP_CHANNEL_ID)
+    if target is None:
+        await ctx.send("Не могу найти канал подслушано. Проверь ID.")
+        return
+
+    anonymous = False
+    content = text
+    if text.lower().startswith("анонимно"):
+        anonymous = True
+        content = text[8:].strip()
+        if not content:
+            await ctx.send("Введи текст после `анонимно`")
+            return
+
+    if anonymous:
+        await target.send(f"📨 **Подслушано:** {content}")
+    else:
+        await target.send(f"📨 **Подслушано от {ctx.author.mention}:** {content}")
+
+    try:
+        await ctx.message.delete()
+    except:
+        pass
+    await ctx.send("✅ Твоя новость опубликована.", delete_after=5)
 
 # ---------- ОБЗВОН ----------
 @bot.command(name="обзвон")
@@ -481,5 +514,7 @@ async def leave(ctx):
         await ctx.guild.voice_client.disconnect()
 
 if __name__ == "__main__":
+    bot.run(TOKEN)t()
+
+if __name__ == "__main__":
     bot.run(TOKEN)
-    
