@@ -14,7 +14,21 @@ from discord.ext import commands
 # ---------- НАСТРОЙКИ ----------
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 VOICE_CHANNEL_ID = None  # ID голосового канала для обзвона, или None
-ALLOWED_ROLES = ["Гос. волна", "Лидер"]
+
+# Роли, которым разрешено управлять гос. волной (!sobes, !cancel)
+ALLOWED_ROLES = [
+    "Зам создателя",
+    "Зам начальника",
+    "Временный лидер",
+    "Создатель 🔧"
+]
+
+# Роли, которым разрешено чистить сообщения (!очистить)
+CLEAR_ROLES = [
+    "Создатель 🔧",
+    "Зам создателя"
+]
+
 SLOT_DURATION = 15          # минут
 MUTE_DURATION = timedelta(minutes=30)
 MIN_BOOK_DELAY = timedelta(minutes=5)
@@ -324,6 +338,19 @@ async def list(ctx):
         msg += f"**{s['family']}** — {h_local:02d}:{m_local:02d} ({t}) записал {uname}\n"
     await ctx.reply(msg, mention_author=False)
 
+# ---------- ОЧИСТКА СООБЩЕНИЙ ----------
+@bot.command(name="очистить")
+async def clear(ctx, amount: int = 10):
+    """Удаляет указанное количество сообщений. Только для CLEAR_ROLES."""
+    if not any(role.name in CLEAR_ROLES for role in ctx.author.roles):
+        await ctx.send("❌ У вас нет прав на очистку сообщений.", delete_after=5)
+        return
+    if amount < 1:
+        await ctx.send("Укажи число больше 0!", delete_after=5)
+        return
+    deleted = await ctx.channel.purge(limit=amount + 1)
+    await ctx.send(f"🧹 Удалено {len(deleted) - 1} сообщений.", delete_after=5)
+
 # ---------- ОБЗВОН ----------
 @bot.command(name="обзвон")
 async def start_exam(ctx, variant: str = None):
@@ -418,7 +445,7 @@ async def answer_exam(ctx, *, answer: str = None):
             f"_Ответьте командой_ `!ответ <ваш ответ>`"
         )
 
-# ---------- ВАЙБ 2018 (ГАРАНТИРОВАННО ЗАЖЖЁТ РАМКУ) ----------
+# ---------- ВАЙБ 2018 ----------
 @bot.command(name="вайб")
 async def vibe(ctx, year: str = None):
     if year != "2018":
@@ -428,7 +455,6 @@ async def vibe(ctx, year: str = None):
         await ctx.send("Зайди в голосовой канал!")
         return
 
-    # Генерируем временный WAV-файл (низкий гул, стерео, 5 секунд)
     output = "/tmp/beat.wav"
     sample_rate = 48000
     freq = 80
@@ -442,14 +468,12 @@ async def vibe(ctx, year: str = None):
             f.writeframes(struct.pack('<hh', sample, sample))
 
     vc = await ctx.author.voice.channel.connect()
-    # Используем FFmpegOpusAudio – opus теперь установлен
     source = discord.FFmpegOpusAudio(output)
     vc.play(source)
     while vc.is_playing():
         await asyncio.sleep(0.1)
     await vc.disconnect()
     os.remove(output)
-
 
 @bot.command(name="отключись")
 async def leave(ctx):
