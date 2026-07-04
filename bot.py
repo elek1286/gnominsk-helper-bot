@@ -13,8 +13,8 @@ from discord.ext import commands
 
 # ---------- НАСТРОЙКИ ----------
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
-VOICE_CHANNEL_ID = None  # ID голосового канала для обзвона, или None
-GOSSIP_CHANNEL_ID = None  # ID канала "подслушано"
+VOICE_CHANNEL_ID = 1435163969219334306  # ID голосового канала для обзвона, или None
+GOSSIP_CHANNEL_ID = 1522970699839569940  # ID канала "подслушано"
 
 # Роли для гос. волны
 ALLOWED_ROLES = [
