@@ -15,7 +15,6 @@ from discord.ext import commands
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 VOICE_CHANNEL_ID = 1435163969219334306  # ID голосового канала для обзвона, или None
 GOSSIP_CHANNEL_ID = 1522970699839569940  # ID канала "подслушано"
-
 # Роли для гос. волны
 ALLOWED_ROLES = [
     "Зам создателя",
@@ -138,7 +137,7 @@ bot.active_exams = {}
 async def check_interviews_loop():
     await bot.wait_until_ready()
     notified = set()
-    print("[LOOP] Started, offset =", TIMEZONE_OFFSET_HOURS)
+    print("[LOOP] Interviews checker started, offset =", TIMEZONE_OFFSET_HOURS)
     while not bot.is_closed():
         now_utc = datetime.now(timezone.utc)
         bot.interviews = clean_old(bot.interviews)
@@ -157,17 +156,41 @@ async def check_interviews_loop():
                 notified.add(slot_id)
         await asyncio.sleep(30)
 
+async def check_reminders_loop():
+    await bot.wait_until_ready()
+    notified = set()
+    print("[LOOP] Reminders checker started")
+    while not bot.is_closed():
+        now_utc = datetime.now(timezone.utc)
+        for rem in bot.reminders[:]:
+            remind_at = datetime.fromisoformat(rem["remind_at"])
+            if remind_at <= now_utc and rem["user_id"] not in notified:
+                user = bot.get_user(rem["user_id"]) or await bot.fetch_user(rem["user_id"])
+                text = f"🔔 Напоминание: срок оплаты дома истекает через 2 дня (оплачено было на {rem['days']} дн.)."
+                try:
+                    await user.send(text)
+                except:
+                    ch = bot.get_channel(rem["channel_id"])
+                    if ch:
+                        await ch.send(f"<@{rem['user_id']}>, {text}")
+                bot.reminders.remove(rem)
+                save_json(REMINDERS_FILE, bot.reminders)
+                notified.add(rem["user_id"])
+        await asyncio.sleep(30)
+
 @bot.event
 async def on_ready():
     print(f"Бот {bot.user} готов!")
     print("Доступные команды:", [cmd.name for cmd in bot.commands])
     bot.loop.create_task(check_interviews_loop())
+    bot.loop.create_task(check_reminders_loop())
 
 @bot.event
 async def on_message(message):
     if message.author.bot:
         return
 
+    # Пасхалки
     if "пицца" in message.content.lower():
         await message.reply("Yummi", mention_author=False)
     if re.search(r"скибиди|skibidi", message.content, re.IGNORECASE):
@@ -185,6 +208,7 @@ async def on_message(message):
     if "духи" in message.content.lower():
         await message.reply("faradenza", mention_author=False)
 
+    # Оплата дома
     match = re.search(r"оплачиваю\s+дом\s+на\s+(\d+)\s*д(?:н(?:ей|я|ь)?)?", message.content, re.IGNORECASE)
     if match:
         days = int(match.group(1))
@@ -203,43 +227,8 @@ async def on_message(message):
         await message.channel.send(
             f"{message.author.mention}, понял! Я напомню об оплате {remind_at.strftime('%d.%m.%Y в %H:%M')} (UTC)."
         )
-        async def remind(rem):
-            delay = (remind_at - datetime.now(timezone.utc)).total_seconds()
-            if delay > 0:
-                await asyncio.sleep(delay)
-            user = bot.get_user(rem["user_id"]) or await bot.fetch_user(rem["user_id"])
-            text = f"🔔 Напоминание: срок оплаты дома истекает через 2 дня (оплачено было на {rem['days']} дн.)."
-            try:
-                await user.send(text)
-            except:
-                ch = bot.get_channel(rem["channel_id"])
-                if ch:
-                    await ch.send(f"<@{rem['user_id']}>, {text}")
-            bot.reminders = [r for r in bot.reminders if r != rem]
-            save_json(REMINDERS_FILE, bot.reminders)
-        bot.loop.create_task(remind(reminder))
     else:
         await bot.process_commands(message)
-
-@bot.event
-async def setup_hook():
-    for rem in bot.reminders:
-        remind_at = datetime.fromisoformat(rem["remind_at"])
-        delay = (remind_at - datetime.now(timezone.utc)).total_seconds()
-        if delay > 0:
-            async def remind(rem):
-                await asyncio.sleep(delay)
-                user = bot.get_user(rem["user_id"]) or await bot.fetch_user(rem["user_id"])
-                text = f"🔔 Напоминание: срок оплаты дома истекает через 2 дня (оплачено было на {rem['days']} дн.)."
-                try:
-                    await user.send(text)
-                except:
-                    ch = bot.get_channel(rem["channel_id"])
-                    if ch:
-                        await ch.send(f"<@{rem['user_id']}>, {text}")
-                bot.reminders = [r for r in bot.reminders if r != rem]
-                save_json(REMINDERS_FILE, bot.reminders)
-            bot.loop.create_task(remind(rem))
 
 # ---------- КОМАНДЫ ГОС. ВОЛНЫ ----------
 @bot.command()
@@ -512,7 +501,6 @@ async def vibe(ctx, year: str = None):
 async def leave(ctx):
     if ctx.guild.voice_client:
         await ctx.guild.voice_client.disconnect()
-
 
 if __name__ == "__main__":
     bot.run(TOKEN)
