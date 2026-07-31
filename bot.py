@@ -386,6 +386,26 @@ async def start_exam(ctx, variant: str = None):
         await ctx.send("У вас уже есть активный обзвон. Сначала завершите его командой `!ответ <ответ>` до конца.")
         return
 
+    # Приветственные сообщения (каждое отдельно)
+    await ctx.send("Здравствуйте уважаемый кандидат!")
+    await asyncio.sleep(0.5)
+    await ctx.send("Вы попали на тест на старший состав!")
+    await asyncio.sleep(0.5)
+    await ctx.send("Просьба не писать ничего лишнего кроме ответов на вопросы и включить демонстрацию экрана.")
+    await asyncio.sleep(0.5)
+    await ctx.send('Напишите "Я готова" или "Я готов" и мы сможем начать.')
+
+    # Ждём ответа от кандидата
+    def check(m):
+        return m.author == ctx.author and m.channel == ctx.channel and m.content.lower() in ["я готов", "я готова"]
+
+    try:
+        await bot.wait_for("message", check=check, timeout=60.0)
+    except asyncio.TimeoutError:
+        await ctx.send("Время вышло. Напишите `!обзвон` снова, когда будете готовы.")
+        return
+
+    # Загружаем вопросы
     questions = bot.questions.get(variant, [])
     if not questions:
         await ctx.send(f"Вариант {variant} пока пуст. Обратитесь к администратору.")
