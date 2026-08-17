@@ -15,6 +15,8 @@ from discord.ext import commands
 TOKEN = os.getenv("DISCORD_BOT_TOKEN")
 VOICE_CHANNEL_ID = 1435163969219334306  # ID голосового канала для обзвона, или None
 GOSSIP_CHANNEL_ID = 1522970699839569940  # ID канала "подслушано"
+LEADER_ID = 1362392888222285995  # ТВОЙ ID (видишь результаты ответов)
+
 # Роли для гос. волны
 ALLOWED_ROLES = [
     "Зам создателя",
@@ -190,7 +192,6 @@ async def on_message(message):
     if message.author.bot:
         return
 
-    # Пасхалки
     if "пицца" in message.content.lower():
         await message.reply("Yummi", mention_author=False)
     if re.search(r"скибиди|skibidi", message.content, re.IGNORECASE):
@@ -208,7 +209,6 @@ async def on_message(message):
     if "духи" in message.content.lower():
         await message.reply("faradenza", mention_author=False)
 
-    # Оплата дома
     match = re.search(r"оплачиваю\s+дом\s+на\s+(\d+)\s*д(?:н(?:ей|я|ь)?)?", message.content, re.IGNORECASE)
     if match:
         days = int(match.group(1))
@@ -382,11 +382,10 @@ async def start_exam(ctx, variant: str = None):
     if variant not in ["1", "2", "3"]:
         await ctx.send("Неверный вариант. Доступны: 1, 2, 3")
         return
-    if ctx.author.id in bot.active_exams:
-        await ctx.send("У вас уже есть активный обзвон. Сначала завершите его командой `!ответ <ответ>` до конца.")
+    if any(exam["channel_id"] == ctx.channel.id for exam in bot.active_exams.values()):
+        await ctx.send("В этом канале уже идёт обзвон. Завершите его или подождите.")
         return
 
-    # Приветственные сообщения (каждое отдельно)
     await ctx.send("Здравствуйте уважаемый кандидат!")
     await asyncio.sleep(0.5)
     await ctx.send("Вы попали на тест на старший состав!")
@@ -395,7 +394,6 @@ async def start_exam(ctx, variant: str = None):
     await asyncio.sleep(0.5)
     await ctx.send('Напишите "Я готова" или "Я готов" и мы сможем начать.')
 
-    # Ждём ответа от кандидата
     def check(m):
         return m.author == ctx.author and m.channel == ctx.channel and m.content.lower() in ["я готов", "я готова"]
 
@@ -405,7 +403,6 @@ async def start_exam(ctx, variant: str = None):
         await ctx.send("Время вышло. Напишите `!обзвон` снова, когда будете готовы.")
         return
 
-    # Загружаем вопросы
     questions = bot.questions.get(variant, [])
     if not questions:
         await ctx.send(f"Вариант {variant} пока пуст. Обратитесь к администратору.")
@@ -436,54 +433,79 @@ async def start_exam(ctx, variant: str = None):
 
 @bot.command(name="ответ")
 async def answer_exam(ctx, *, answer: str = None):
-    user_id = ctx.author.id
-    if user_id not in bot.active_exams:
-        return
-    exam = bot.active_exams[user_id]
-    if ctx.channel.id != exam["channel_id"]:
+    # Ищем активный экзамен в этом канале
+    active = None
+    for uid, exam in bot.active_exams.items():
+        if exam["channel_id"] == ctx.channel.id:
+            active = exam
+            break
+
+    if not active:
         return
 
     if answer is None:
         await ctx.send("Укажите ваш ответ: `!ответ <текст>`")
         return
 
-    q = exam["questions"][exam["current"]]
+    q = active["questions"][active["current"]]
+
     if "answers" in q:
         correct_answers = [a.strip().lower() for a in q["answers"]]
     else:
         correct_answers = [q["answer"].strip().lower()]
 
     user_answer = answer.strip().lower()
+    is_correct = user_answer in correct_answers
 
-    if user_answer in correct_answers:
-        exam["correct"] += 1
+    # Отправляем результат проверки лидеру в ЛС
+    if ctx.author.id != LEADER_ID:
+        leader = ctx.guild.get_member(LEADER_ID)
+        if leader:
+            try:
+                info = (
+                    f"📝 **Ответ от {ctx.author.mention}**\n"
+                    f"Вопрос: {q['question']}\n"
+                    f"Ответ игрока: {answer}\n"
+                    f"Правильные варианты: {', '.join(correct_answers)}\n"
+                    f"Результат: {'✅ правильно' if is_correct else '❌ неправильно'}"
+                )
+                await leader.send(info)
+            except:
+                pass  # если ЛС закрыты — не страшно
+
+    if is_correct:
+        active["correct"] += 1
         pts = q.get("points", 1)
-        exam["points"] += pts
+        active["points"] += pts
 
-    exam["current"] += 1
-    if exam["current"] >= exam["total"]:
-        correct = exam["correct"]
-        total = exam["total"]
-        score = exam["points"]
-        max_score = exam["max_points"]
-        if correct >= exam["pass_threshold"]:
+    active["current"] += 1
+    if active["current"] >= active["total"]:
+        correct = active["correct"]
+        total = active["total"]
+        score = active["points"]
+        max_score = active["max_points"]
+        if correct >= active["pass_threshold"]:
             result_text = "Обзвон пройден"
         else:
             result_text = "Вы не прошли обзвон"
         await ctx.send(
             f"**Обзвон завершён!**\n"
-            f"Правильных ответов: {correct} из {total} (нужно ≥ {exam['pass_threshold']})\n"
+            f"Правильных ответов: {correct} из {total} (нужно ≥ {active['pass_threshold']})\n"
             f"Набрано баллов: {score} из {max_score}\n"
             f"Результат: **{result_text}**"
         )
-        del bot.active_exams[user_id]
+        # Удаляем экзамен
+        for uid, exam in list(bot.active_exams.items()):
+            if exam == active:
+                del bot.active_exams[uid]
+                break
     else:
-        next_q = exam["questions"][exam["current"]]
+        next_q = active["questions"][active["current"]]
         pts = next_q.get("points", 1)
-        q_number = next_q.get("number", exam["current"]+1)
+        q_number = next_q.get("number", active["current"] + 1)
         await ctx.send(
             f"Понял, дальше\n"
-            f"**Вопрос {q_number}/{exam['total']}** ({pts} балл.): {next_q['question']}\n"
+            f"**Вопрос {q_number}/{active['total']}** ({pts} балл.): {next_q['question']}\n"
             f"_Ответьте командой_ `!ответ <ваш ответ>`"
         )
 
